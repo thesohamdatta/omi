@@ -2,272 +2,286 @@
 
 ## Status
 
-Design specification for the first vertical-slice implementation.
+Refined after repository inspection and second-pass domain review.
 
-## Goal
+## Objective
 
-Make Omi's capture state trustworthy and understandable without replacing existing capture, WAL, sync, transcription, device, or agent infrastructure.
+Make mobile capture status trustworthy without creating a second capture system.
 
-The contract separates five facts:
+The first slice must let Omi answer:
 
-1. capture source health
-2. transcription transport/readiness
-3. local durability (WAL)
-4. upload/sync state
-5. server-side processing state
+> What is Omi actually capturing right now, and what part of the pipeline is not working?
 
-The user-facing state is derived from those facts. No surface should invent its own `isRecording` or `isHealthy` meaning.
+The answer is derived from existing production evidence. It is not a new source of truth.
 
-## Scope
+## User-visible scope
 
-First phase covers the mobile capture path and the existing macOS semantic reference.
+The first implementation covers the live mobile capture path.
 
-In scope:
-- typed mobile capture-health projection
-- existing `recording_id` as correlation key
-- transcription transport outcome evidence on the existing mobile socket path
-- deterministic scenario tests
-- primary mobile status surface
-- model-facing context adapter in a later slice
+It must distinguish:
 
-Out of scope:
-- firmware changes
-- BLE protocol changes
-- new backend service
-- new database
-- new UUID/session identity
-- LLM provider changes
-- memory/task architecture changes
-- sync protocol replacement
-- capture rewrite
+- capture source health
+- transcription transport/readiness
+- local durability
 
-## Reference implementation
+It may expose bounded freshness and reason information.
 
-macOS Context for Claude already provides the semantic reference:
+Upload admission, server-side processing, memory promotion, task systems, and desktop parity remain later integration work.
 
-Per source:
-- `starting`
-- `live`
-- `blocked`
-- `stalled`
-- `off`
+## Domain model
 
-Aggregate:
+### Capture source
+
+The producer of audio for the active recording.
+
+A source is live only when current evidence indicates that it is producing audio. Requested/constructed/connected does not prove liveness.
+
+### Capture health
+
+A derived semantic result:
+
 - `capturing`
 - `degraded`
 - `off`
 
-The implementation also preserves per-source reason and last-output time, and tests that a live microphone cannot hide a dead screen.
+Capture health owns no runtime behavior.
 
-Mobile should adopt the semantics, not copy the macOS implementation.
+### Transcription transport
 
-## Correlation
+The path that can carry captured audio toward transcription.
 
-Use the existing `recording_id`.
+### Transcription readiness
 
-For live mobile capture it is already sent as `client_conversation_id` to `/v4/listen`.
+Whether the current transcription path is usable. Socket existence alone does not establish readiness.
 
-Do not add:
-- `session_generation` analytics fields
-- another recording UUID
-- another cross-platform durable identity
+### Local durability
 
-Capture ownership/generation remains an internal concurrency boundary.
+Whether captured audio is safely retained locally for later synchronization.
 
-## Evidence model
+### Recording identity
 
-Mobile evidence comes from existing components:
+The existing `recording_id` owned by `RecordingLifecycleTelemetry`.
 
-- `CaptureController`
-- `CaptureProvider`
-- `RecordingLifecycleTelemetry`
-- `SyncProvider`
-- WAL state
-- transcription socket lifecycle
+Do not create another recording UUID or analytics identity.
 
-Transport and task success must remain distinct.
+### Concurrency generation
 
-Example:
+The internal `CaptureSessionOwner` generation used to reject stale asynchronous work.
 
-```
-audio bytes flowing
-    + recording_id
-    + socket unavailable
-    + WAL available
-= capture healthy, transcription degraded, local durability active
-```
+Generation is not recording identity and must not become a new analytics field.
 
-That must never render as a simple `Listening` state with no qualifier.
+## Existing authoritative evidence
 
-## Derived state precedence
+The projection must consume existing production facts:
 
-The projection uses this conceptual order:
+- `CaptureController.recordingState`
+- `CaptureController.activeRecordingId`
+- existing phone-microphone recording/stall/interruption signals
+- `TranscriptSegmentSocketService.state`
+- existing transcription-readiness state in `CaptureController`
+- existing WAL/local-durability state
+- existing `CaptureSessionOwner` generation fencing
 
-### User deliberately paused
+Analytics is observational. It must never become runtime truth.
 
-Result:
-`off` / `paused`
+## Core rules
 
-### No source is producing and capture was requested
+The following are distinct facts:
 
-Result:
-`blocked` or `stalled`, with source reason.
+1. capture was requested
+2. capture source is producing
+3. transcription transport is connected
+4. transcription path is ready
+5. captured audio is locally durable
+6. upload was accepted
+7. server processing completed
 
-### At least one source is producing and a required source is blocked/stalled
+The first slice must not collapse these facts into one boolean.
 
-Result:
-`degraded`
+## State derivation
 
-### Sources producing and transcription path ready
+### Deliberate pause
 
-Result:
-`capturing`
+If the user has deliberately paused the active capture:
 
-### Sources producing but transcription transport unavailable
+`health = off`, `reason = paused`.
 
-Result:
-`capturing` with transcription substate `degraded` and explicit local-buffering explanation.
+Pause is not failure.
 
-### Local WAL exists and upload is pending
+### Requested but no source is producing
 
-Result:
-`captured locally` with sync substate `pending`.
+Return:
 
-### Upload accepted but processing continues
+`blocked` or `stalled`
 
-Result:
-`synced` with processing substate `processing`.
+with the bounded source reason.
 
-The display layer chooses concise copy from these typed facts. The projection must not collapse meaningful degradation into a green/healthy boolean.
+A source entering `initialising` is not sufficient to claim healthy capture.
+
+### Source producing, downstream degradation
+
+If a source is producing but transcription is unavailable or reconnecting:
+
+`health = capturing`
+
+with transcription substate `degraded`.
+
+If local durability is available, retain that fact.
+
+Transcription failure must not be represented as capture failure when audio is still being captured safely.
+
+### Source degradation
+
+If a required capture source is blocked or stalled while another required source is live:
+
+`health = degraded`.
+
+### Healthy capture
+
+When the active source is producing and the transcription path is usable:
+
+`health = capturing`.
+
+## Pure projection boundary
+
+The first implementation should expose a small pure boundary equivalent to:
+
+`input evidence -> semantic capture-health result`
+
+It must have:
+
+- no network calls
+- no LLM calls
+- no database writes
+- no timers
+- no socket ownership
+- no capture-control methods
+- no analytics side effects
+
+The result may include:
+
+- aggregate health
+- source state
+- transcription substate
+- local durability substate
+- bounded reason code
+- freshness timestamps
+- existing `recording_id`
+
+Exact type names are implementation details and should be chosen to fit existing Dart conventions.
 
 ## Freshness
 
-A source is only considered `live` while it is producing current evidence.
+A source cannot be marked live merely because startup succeeded.
 
-Every source may carry `lastOutputAt`.
+Where producer-side timestamps or stall signals exist, preserve them.
 
-A watchdog timeout may transition:
-`live -> stalled`.
+Do not invent timestamps for evidence the underlying producer does not provide.
 
-Starting a source does not prove liveness.
+A later watchdog may transition:
 
-A transport reconnect does not mint a new recording identity.
+`live -> stalled`
+
+The first slice may consume existing stall signals without adding a new watchdog.
+
+## Correlation and stale work
+
+The projection must use the existing `recording_id` for correlation.
+
+`CaptureSessionOwner` remains the authority for stale asynchronous work.
+
+A socket reconnect retains the same `recording_id`.
+
+A stale completion from an earlier recording must not mutate or publish health for the current recording.
 
 ## Privacy
 
-Health context may contain:
-- enum states
-- bounded reason codes/details
-- timestamps
-- opaque recording id where already permitted
+Health data may contain:
 
-It must not contain:
+- closed states
+- bounded reason codes
+- timestamps
+- existing opaque `recording_id` where already permitted
+
+Health data must not contain:
+
 - transcript text
 - raw audio
 - screenshots
-- window contents
 - credentials
-- device serial/name where not already contractually required
+- arbitrary device names or serial numbers
+- unrelated personal content
 
-## Vertical slices
+## Non-goals
 
-### V1: mobile semantic projection
+This change must not:
 
-Deliver:
-- `CaptureHealthState`
-- `CaptureHealthProjection`
-- adapters from existing capture/transcription/sync evidence
-- socket transport outcome evidence
-- scenario fixtures and tests
+- rewrite capture
+- redesign `CaptureSessionOwner`
+- replace `CaptureController`
+- replace WAL/sync
+- add a backend health endpoint
+- modify firmware or BLE protocol
+- add a new UUID
+- add a second transcript store
+- make analytics authoritative
+- redesign memory/task architecture
+- implement desktop parity
+- introduce a large cross-pipeline state machine
 
-Acceptance:
-- healthy capture -> `capturing`
-- one failed required source + another live -> `degraded`
-- deliberately paused -> `off/paused`
-- local audio + broken transcription -> explicit degraded transcription state
-- stale callbacks do not change the current recording
-- same `recording_id` survives socket reconnect
+## Test-first acceptance
 
-### V2: user-facing mobile status
+The first implementation is accepted when deterministic hermetic tests prove at least:
 
-Deliver:
-- single primary capture status component
-- existing controls remain unchanged
-- degraded detail shown only when needed
+1. live source + usable transcription -> `capturing`
+2. live source + unavailable transcription + local durability -> `capturing` with degraded transcription
+3. source blocked/stalled while another required source is live -> `degraded`
+4. deliberate pause -> `off/paused`
+5. requested capture with no producing source -> blocked/stalled with reason
+6. existing recording identity is preserved across transcription reconnect
+7. stale completion cannot affect a newer recording
 
-Acceptance:
-- no false `Listening` when transcription is explicitly unavailable
-- user can identify the failing stage without opening logs
-- layout remains lightweight
+Tests must exercise the agreed public projection seam, not private implementation details.
 
-### V3: agent context
+## Integration path
 
-Deliver:
-- add capture health to existing context packet builder
-- include state + freshness + reason
-- preserve existing packet size/provenance controls
+After the pure projection is green:
 
-Acceptance:
-- agent can distinguish stale screen evidence from lack of historical evidence
-- agent never gets raw content from health packet
+1. add transport outcome evidence at the existing transcription lifecycle seam
+2. connect the projection to the primary mobile status surface
+3. reuse the projection in agent context
+4. align desktop adapters
 
-### V4: desktop parity
-
-Deliver:
-- semantic adapters for existing macOS/Windows health signals
-- no capture implementation rewrite
-
-Acceptance:
-- equivalent runtime conditions map to equivalent semantic health
-
-## Required test scenarios
-
-1. all sources live
-2. mic live, screen blocked
-3. screen stalled
-4. mic stalled
-5. all sources off
-6. user pause
-7. storage unavailable
-8. storage opening while sources are live
-9. audio live, transcription unavailable
-10. audio live, transcription reconnecting
-11. local WAL pending upload
-12. upload accepted, server processing pending
-13. stale callback after stop
-14. stale callback after new recording begins
-15. device disconnect/reconnect
-16. account switch during capture
+Each later slice must preserve the same semantic contract.
 
 ## Verification
 
-Before merge:
-- focused mobile capture unit tests
-- capture recovery/generation tests
-- new semantic projection tests
-- macOS CaptureHealth and status-honesty tests
-- relevant mobile verification harness
-- relevant preflight checks
-- no live LLM dependency in CI
+Before PR merge:
 
-## Review checklist
+- focused mobile unit tests
+- relevant capture ownership/generation tests
+- `dart format` on touched Dart files
+- the component test runner
+- relevant mobile verification lane for user-facing UI
+- `make preflight`
+- verification evidence recorded in the PR
 
-- [ ] No second source of truth for capture
-- [ ] Existing recording_id reused
-- [ ] No new dependency
-- [ ] No backend schema migration
-- [ ] No firmware changes
-- [ ] Failure reason remains actionable
-- [ ] Intentional off is not treated as failure
-- [ ] Stalled means no recent evidence, not merely started
-- [ ] Transport success and capture success are distinct
-- [ ] Model-facing packet is bounded and privacy safe
-- [ ] Existing ownership/session fences remain authoritative
+No live service or LLM dependency belongs in hermetic tests.
 
-## Success criterion
+## Review gates
 
-After V1, the system can answer one question reliably:
+Review the resulting change on two independent axes:
 
-"What is Omi actually capturing right now, and what part is not working?"
+### Standards
 
-The answer must be consistent enough for a user interface and an agent to consume the same underlying facts without guessing.
+Does the implementation follow Omi's engineering rules, testing conventions, ownership boundaries, privacy requirements, and maintainability expectations?
+
+### Specification
+
+Does the implementation actually satisfy the behavioral contract above, without missing requirements or adding unrelated behavior?
+
+A passing standards review does not imply a passing specification review, and vice versa.
+
+## Success condition
+
+The same semantic projection can drive both a later mobile UI and a later agent context adapter, so neither surface has to guess what the capture pipeline is doing.
