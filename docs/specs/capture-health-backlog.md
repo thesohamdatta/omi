@@ -1,162 +1,155 @@
-# Break V1 into vertical slices
+# Capture Health Implementation Tickets
 
-This issue is the implementation backlog for the capture-health contract specified in `docs/specs/capture-health-contract.md`.
+These tickets implement the refined capture-health contract as tracer-bullet vertical slices.
 
-## Child issues
+## Ticket 01: Prove the pure mobile capture-health projection
 
-### 1. Typed mobile projection
-Implement the smallest typed projection over existing capture/transcription/sync state. No behavioral capture rewrite.
+**What to build**
 
-### 2. Transcription transport evidence
-Add transport outcome evidence using the existing `recording_id`. Keep telemetry non-authoritative and side-effect free.
+When given a fixed set of existing mobile capture facts, Omi deterministically produces a truthful semantic capture-health result. The result is usable without running the capture system.
 
-### 3. Mobile status surface
-Consume the projection from the primary capture UI and replace ambiguous status wording with one truthful sentence plus optional detail.
+**Blocked by**
 
-### 4. Agent context adapter
-Expose the projection to the existing context packet/agent context path with bounded freshness and reason fields.
+None. This is the frontier ticket.
 
-### 5. Desktop parity
-Map existing macOS/Windows health signals to the same semantics without changing their capture engines.
+**Acceptance criteria**
 
-## Dependency order
+- [ ] A producing source with usable transcription is `capturing`.
+- [ ] A producing source with unavailable/reconnecting transcription remains `capturing`, with explicit transcription degradation.
+- [ ] A blocked or stalled required source while another required source is live is `degraded`.
+- [ ] A deliberate pause is `off/paused`.
+- [ ] A requested capture with no producing source reports blocked/stalled with bounded reason.
+- [ ] Existing `recording_id` can be carried without creating another identity.
+- [ ] The projection has no network, LLM, database, timer, socket ownership, capture-control, or analytics side effect.
+- [ ] Tests exercise the public projection boundary and are hermetic.
 
-1 -> 2 -> 3 -> 4 -> 5
+**Verification**
 
-Each slice should be independently testable and reviewable.
+Run the focused projection test file, Dart formatting for touched Dart, then the app test lane relevant to the changed package.
 
+## Ticket 02: Prove transcription transport truth without changing capture identity
 
-# V1: Add a typed mobile capture-health projection
+**What to build**
 
-## Goal
+During a live recording, Omi can observe whether the transcription path is connecting, usable, unavailable, or reconnecting, while the recording continues to use the existing `recording_id`.
 
-Turn existing mobile capture, transcription, and sync evidence into one deterministic typed projection without changing capture behavior.
+**Blocked by**
 
-## Scope
+- Ticket 01
 
-Primary files to inspect:
-- `app/lib/services/capture/capture_controller.dart`
-- `app/lib/services/capture/recording_lifecycle_telemetry.dart`
-- `app/lib/providers/capture_provider.dart`
-- `app/lib/providers/sync_provider.dart`
-- existing WAL state/services
+**Acceptance criteria**
 
-Add only the smallest new projection/seam needed to represent:
-- source states: `starting | live | blocked | stalled | off`
-- aggregate: `capturing | degraded | off`
-- transcription substate
-- sync substate
-- detail/reason
-- existing `recording_id`
-- freshness timestamp(s)
+- [ ] A successful transcription connection produces observable transport evidence.
+- [ ] A failed connection produces bounded failure evidence.
+- [ ] Reconnection keeps the same `recording_id`.
+- [ ] A stale async connection result cannot publish state for a newer recording.
+- [ ] Telemetry cannot change capture success/failure when its emitter throws.
+- [ ] No transcript/audio/content payload is included in transport evidence.
+- [ ] The projection consumes this evidence without becoming the owner of the socket.
 
-Do not replace existing providers or controllers.
+**Verification**
 
-## Acceptance
+Run focused capture ownership/generation and transcription lifecycle tests, then the relevant mobile verification lane if the user path changes.
 
-- deterministic mapping of healthy/degraded/paused/stalled states
-- local capture can remain healthy when transcription transport is unavailable
-- upload/processing state is not confused with source capture
-- deliberate pause is not a failure
-- no new UUID/session identity
-- projection has no network/LLM dependency
+## Ticket 03: Surface one truthful status in the primary mobile capture UI
 
-## Required tests
+**What to build**
 
-At minimum:
-- all sources live
-- source blocked + another live
-- source stalled
-- user paused
-- audio live + transcription unavailable
-- upload pending
-- upload accepted + processing pending
-- no source active
+The main mobile capture status tells the user the current capture condition in one lightweight sentence, with a more specific detail only when something is degraded.
 
-## Verification
+**Blocked by**
 
-Run focused Flutter tests for the touched seams and `dart format` only on touched Dart files.
+- Ticket 02
 
+**Acceptance criteria**
 
-# V1: Add mobile transcription transport outcome evidence
+- [ ] Healthy capture remains visually simple.
+- [ ] Transcription degradation does not claim that audio capture stopped.
+- [ ] Source degradation identifies the affected source/stage.
+- [ ] Deliberate pause remains a deliberate paused state, not an error.
+- [ ] Copy is localized through the existing localization system.
+- [ ] Existing capture controls and ownership behavior are unchanged.
+- [ ] Widget tests cover healthy, degraded, paused, and unavailable-transcription states.
 
-## Goal
+**Verification**
 
-Close the observability gap where mobile capture can continue locally while the transcription socket is unavailable, without minting another recording identity.
+Run the focused widget tests, Dart formatting, and the app's mobile user-journey verification required for UI changes.
 
-## Scope
+## Ticket 04: Reuse the same health projection in agent context
 
-Use existing `recording_id` as the correlation key.
+**What to build**
 
-Instrument the existing transcription socket connect/reconnect lifecycle so the projection can distinguish:
-- transport connecting
-- transport active
-- transport failed/unavailable
+The existing agent/context packet can report current capture health and freshness using the same semantic projection as the mobile UI, without exposing captured content.
 
-Do not add a new UUID.
+**Blocked by**
 
-Do not make telemetry affect capture behavior.
+- Ticket 03
 
-Prefer the existing analytics/telemetry path and existing closed enums.
+**Acceptance criteria**
 
-## Acceptance
+- [ ] Context contains aggregate health, relevant substate, freshness, and bounded reason.
+- [ ] It does not contain transcript text, raw audio, screenshots, credentials, or unrelated personal data.
+- [ ] Stale source evidence is distinguishable from missing historical evidence.
+- [ ] Existing context packet provenance, size, TTL, and retention contracts remain intact.
+- [ ] No second transcript, memory, or capture store is introduced.
+- [ ] Hermetic packet tests cover normal and degraded capture.
 
-- connect success is observable
-- permanent/temporary connection failure is observable
-- reconnect attempts remain associated with the same `recording_id`
-- stale generation cannot emit for a replaced recording
-- telemetry failure cannot change capture success/failure
-- no raw audio/transcript content is emitted
+**Verification**
 
-## Required tests
+Run focused context packet tests and the relevant agent-context contract checks.
 
-- connection success
-- connection failure
-- reconnect under same recording_id
-- stale connection completion after stop/new session
-- analytics emitter throwing does not affect capture
+## Ticket 05: Align desktop adapters with the mobile semantic vocabulary
 
-## Verification
+**What to build**
 
-Run capture socket generation/recovery tests and the relevant mobile verification lane.
+Existing macOS/Windows capture-health signals map into the same semantic vocabulary without rewriting their capture engines.
 
+**Blocked by**
 
-# V1c: Surface capture health in the mobile UI
+- Ticket 04
 
-Consume the V1 projection from the main capture status surface.
+**Acceptance criteria**
 
-Do not rewrite capture controls.
+- [ ] Equivalent runtime conditions map to equivalent semantic health.
+- [ ] Existing macOS capture-health and status-honesty tests remain green.
+- [ ] Windows adapter behavior is covered by hermetic tests.
+- [ ] Platform capture ownership remains unchanged.
+- [ ] No new cross-platform runtime owner is introduced.
 
-Acceptance:
-- healthy capture remains visually simple
-- degraded capture names the affected stage/source
-- no false "Listening" when transcription is explicitly unavailable
-- paused remains a deliberate paused state
-- copy goes through existing localization
+**Verification**
 
-Add widget tests for each display state.
+Run focused desktop adapter tests plus existing macOS/Windows component verification.
 
-# V1d: Add capture health to agent context
+## Dependency graph
 
-Feed the capture-health projection into the existing context packet path.
+01 Projection
+   ↓
+02 Transcription transport evidence
+   ↓
+03 Mobile status surface
+   ↓
+04 Agent context
+   ↓
+05 Desktop parity
 
-Acceptance:
-- includes state, freshness and bounded reason
-- no raw transcript, audio, screenshot or credentials
-- stale source evidence is explicit
-- packet size/provenance contracts remain intact
-- no second transcript or memory store
+## Ticketing rules
 
-Add hermetic packet tests.
+Each ticket must answer: What can I demonstrate when this ticket is complete?
 
-# V1e: Align desktop health semantics
+Implementation follows the repository's TDD discipline:
 
-Map existing macOS and Windows capture health signals to the same semantic vocabulary used by mobile.
+`test at agreed public seam -> minimal implementation -> repeat -> review`
 
-Do not rewrite platform capture engines.
+Do not batch an entire test suite before implementation. Do not add abstractions without a demonstrated need.
 
-Acceptance:
-- equivalent runtime conditions produce equivalent semantic health
-- platform-specific UI remains unchanged unless needed
-- existing macOS capture-health tests remain green
-- Windows capture tests cover the adapter mapping
+The ticket list is intentionally smaller than the original backlog because the pure projection is now the shared semantic seam.
+
+## Repository constraints
+
+- Reuse the existing `recording_id`.
+- Preserve `CaptureSessionOwner` as the stale-work authority.
+- Do not modify firmware or BLE protocol.
+- Do not add a backend service or schema.
+- Do not make analytics authoritative.
+- Keep hermetic tests free of network, live services, sleeps, and real devices.
+- Follow `AGENTS.md` Definition of Done, including focused verification, real user-path verification where applicable, and `make preflight` before PR merge.
