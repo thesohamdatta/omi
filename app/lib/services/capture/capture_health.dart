@@ -62,6 +62,33 @@ class CaptureHealthResult {
   bool get isOff => health == CaptureHealth.off;
 }
 
+CaptureHealthEvidence captureHealthEvidenceForAudioOutput({
+  required RecordingState recordingState,
+  required bool hasAudioOutput,
+  DateTime? lastAudioOutputAt,
+  String? recordingId,
+  CaptureTranscriptionState transcription = CaptureTranscriptionState.connecting,
+  CaptureDurabilityState durability = CaptureDurabilityState.unknown,
+  String? transcriptionReason,
+  String? durabilityReason,
+}) {
+  final lifecycle = captureSourceStateForRecording(recordingState);
+  final source = hasAudioOutput
+      ? CaptureSourceState.live
+      : lifecycle;
+
+  return CaptureHealthEvidence(
+    source: source,
+    transcription: transcription,
+    durability: durability,
+    recordingId: recordingId,
+    sourceReason: source == CaptureSourceState.starting ? 'awaiting_audio_output' : null,
+    sourceLastOutputAt: lastAudioOutputAt,
+    transcriptionReason: transcriptionReason,
+    durabilityReason: durabilityReason,
+  );
+}
+
 /// Deep module containing the semantic rules for mobile capture health.
 ///
 /// The interface is intentionally small: callers provide evidence and receive
@@ -151,30 +178,3 @@ CaptureSourceState captureSourceStateForRecording(RecordingState state) => switc
       RecordingState.interrupted => CaptureSourceState.stalled,
       RecordingState.error => CaptureSourceState.blocked,
     };
-
-/// Builds source evidence using observed audio output as the authority for
-/// `live`. Lifecycle state is supporting context only.
-CaptureHealthEvidence captureHealthEvidenceForAudioOutput({
-  required RecordingState recordingState,
-  required bool hasAudioOutput,
-  DateTime? lastAudioOutputAt,
-  String? recordingId,
-}) {
-  final lifecycle = captureSourceStateForRecording(recordingState);
-  final source = hasAudioOutput
-      ? CaptureSourceState.live
-      : lifecycle == CaptureSourceState.off || lifecycle == CaptureSourceState.blocked
-          ? lifecycle
-          : lifecycle == CaptureSourceState.stalled
-              ? CaptureSourceState.stalled
-              : CaptureSourceState.starting;
-
-  return CaptureHealthEvidence(
-    source: source,
-    transcription: CaptureTranscriptionState.connecting,
-    durability: CaptureDurabilityState.unknown,
-    recordingId: recordingId,
-    sourceReason: source == CaptureSourceState.starting ? 'awaiting_audio_output' : null,
-    sourceLastOutputAt: lastAudioOutputAt,
-  );
-}
