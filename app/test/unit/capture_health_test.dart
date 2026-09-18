@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:omi/services/capture/capture_health.dart';
+import 'package:omi/utils/enums.dart';
 
 void main() {
   const projection = CaptureHealthProjection();
