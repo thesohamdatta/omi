@@ -57,7 +57,6 @@ void main() {
         source: CaptureSourceState.off,
         transcription: CaptureTranscriptionState.off,
         durability: CaptureDurabilityState.unknown,
-        reason: null,
       ),
     );
 
