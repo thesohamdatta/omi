@@ -2,28 +2,21 @@ import 'package:flutter/foundation.dart';
 
 import 'package:omi/utils/enums.dart';
 
-/// Semantic state of a capture source.
+/// Semantic state of the audio producer for a capture session.
 enum CaptureSourceState { starting, live, blocked, stalled, off }
 
-/// Semantic state of the transcription path used by the active capture.
+/// Semantic state of the transcription path for a capture session.
 enum CaptureTranscriptionState { connecting, ready, degraded, off }
 
-/// Semantic state of local recording durability.
+/// Semantic state of local audio durability.
 enum CaptureDurabilityState { available, unavailable, pending, unknown }
 
-/// User-facing aggregate interpretation of the active capture pipeline.
-///
-/// This is derived state. It does not start, stop, reconnect, upload, or mutate
-/// any runtime owner.
+/// Derived user-facing interpretation of capture.
 enum CaptureHealth { capturing, degraded, off }
 
-/// Immutable evidence presented to [CaptureHealthProjection].
-///
-/// The producer owns the facts. The projection only interprets them.
 @immutable
 class CaptureHealthEvidence {
   const CaptureHealthEvidence({
-    required this.captureRequested,
     required this.source,
     required this.transcription,
     required this.durability,
@@ -32,10 +25,8 @@ class CaptureHealthEvidence {
     this.sourceLastOutputAt,
     this.transcriptionReason,
     this.durabilityReason,
-    this.paused = false,
   });
 
-  final bool captureRequested;
   final CaptureSourceState source;
   final CaptureTranscriptionState transcription;
   final CaptureDurabilityState durability;
@@ -44,10 +35,8 @@ class CaptureHealthEvidence {
   final DateTime? sourceLastOutputAt;
   final String? transcriptionReason;
   final String? durabilityReason;
-  final bool paused;
 }
 
-/// Immutable semantic result shared by later UI and agent adapters.
 @immutable
 class CaptureHealthResult {
   const CaptureHealthResult({
@@ -73,74 +62,15 @@ class CaptureHealthResult {
   bool get isOff => health == CaptureHealth.off;
 }
 
-/// Pure semantic projection for current mobile capture evidence.
+/// Deep module containing the semantic rules for mobile capture health.
 ///
-/// Deliberately contains no I/O and no runtime ownership. This keeps the seam
-/// cheap to test and prevents a status surface from becoming a second capture
-/// controller.
+/// The interface is intentionally small: callers provide evidence and receive
+/// one immutable result. This module owns no capture behavior or I/O.
 class CaptureHealthProjection {
   const CaptureHealthProjection();
 
   CaptureHealthResult project(CaptureHealthEvidence evidence) {
-    if (evidence.paused) {
-      return CaptureHealthResult(
-        health: CaptureHealth.off,
-        source: CaptureSourceState.off,
-        transcription: CaptureTranscriptionState.off,
-        durability: evidence.durability,
-        recordingId: evidence.recordingId,
-        reason: 'paused',
-        lastEvidenceAt: evidence.sourceLastOutputAt,
-      );
-    }
-
-    if (!evidence.captureRequested) {
-      return CaptureHealthResult(
-        health: CaptureHealth.off,
-        source: CaptureSourceState.off,
-        transcription: CaptureTranscriptionState.off,
-        durability: evidence.durability,
-        recordingId: evidence.recordingId,
-        reason: 'not_requested',
-        lastEvidenceAt: evidence.sourceLastOutputAt,
-      );
-    }
-
     switch (evidence.source) {
-      case CaptureSourceState.blocked:
-      case CaptureSourceState.stalled:
-        return CaptureHealthResult(
-          health: CaptureHealth.degraded,
-          source: evidence.source,
-          transcription: evidence.transcription,
-          durability: evidence.durability,
-          recordingId: evidence.recordingId,
-          reason: evidence.sourceReason ?? _defaultSourceReason(evidence.source),
-          lastEvidenceAt: evidence.sourceLastOutputAt,
-        );
-
-      case CaptureSourceState.starting:
-        return CaptureHealthResult(
-          health: CaptureHealth.degraded,
-          source: evidence.source,
-          transcription: evidence.transcription,
-          durability: evidence.durability,
-          recordingId: evidence.recordingId,
-          reason: evidence.sourceReason ?? 'starting',
-          lastEvidenceAt: evidence.sourceLastOutputAt,
-        );
-
-      case CaptureSourceState.off:
-        return CaptureHealthResult(
-          health: CaptureHealth.degraded,
-          source: evidence.source,
-          transcription: evidence.transcription,
-          durability: evidence.durability,
-          recordingId: evidence.recordingId,
-          reason: evidence.sourceReason ?? 'source_off',
-          lastEvidenceAt: evidence.sourceLastOutputAt,
-        );
-
       case CaptureSourceState.live:
         return CaptureHealthResult(
           health: CaptureHealth.capturing,
@@ -151,15 +81,55 @@ class CaptureHealthProjection {
           reason: _downstreamReason(evidence),
           lastEvidenceAt: evidence.sourceLastOutputAt,
         );
+      case CaptureSourceState.starting:
+        return CaptureHealthResult(
+          health: CaptureHealth.degraded,
+          source: evidence.source,
+          transcription: evidence.transcription,
+          durability: evidence.durability,
+          recordingId: evidence.recordingId,
+          reason: evidence.sourceReason ?? 'starting',
+          lastEvidenceAt: evidence.sourceLastOutputAt,
+        );
+      case CaptureSourceState.blocked:
+        return CaptureHealthResult(
+          health: CaptureHealth.degraded,
+          source: evidence.source,
+          transcription: evidence.transcription,
+          durability: evidence.durability,
+          recordingId: evidence.recordingId,
+          reason: evidence.sourceReason ?? 'source_blocked',
+          lastEvidenceAt: evidence.sourceLastOutputAt,
+        );
+      case CaptureSourceState.stalled:
+        return CaptureHealthResult(
+          health: CaptureHealth.degraded,
+          source: evidence.source,
+          transcription: evidence.transcription,
+          durability: evidence.durability,
+          recordingId: evidence.recordingId,
+          reason: evidence.sourceReason ?? 'source_stalled',
+          lastEvidenceAt: evidence.sourceLastOutputAt,
+        );
+      case CaptureSourceState.off:
+        return CaptureHealthResult(
+          health: CaptureHealth.off,
+          source: evidence.source,
+          transcription: CaptureTranscriptionState.off,
+          durability: evidence.durability,
+          recordingId: evidence.recordingId,
+          reason: evidence.sourceReason ?? 'off',
+          lastEvidenceAt: evidence.sourceLastOutputAt,
+        );
     }
   }
 
   String? _downstreamReason(CaptureHealthEvidence evidence) {
     switch (evidence.transcription) {
-      case CaptureTranscriptionState.degraded:
-        return evidence.transcriptionReason ?? 'transcription_unavailable';
       case CaptureTranscriptionState.connecting:
         return evidence.transcriptionReason ?? 'transcription_connecting';
+      case CaptureTranscriptionState.degraded:
+        return evidence.transcriptionReason ?? 'transcription_unavailable';
       case CaptureTranscriptionState.ready:
       case CaptureTranscriptionState.off:
         return evidence.durability == CaptureDurabilityState.unavailable
@@ -167,49 +137,15 @@ class CaptureHealthProjection {
             : null;
     }
   }
-
-  String _defaultSourceReason(CaptureSourceState source) => switch (source) {
-        CaptureSourceState.blocked => 'source_blocked',
-        CaptureSourceState.stalled => 'source_stalled',
-        CaptureSourceState.starting => 'starting',
-        CaptureSourceState.off => 'source_off',
-        CaptureSourceState.live => '',
-      };
 }
 
-CaptureHealthEvidence captureHealthEvidenceFromRecordingState({
-  required bool captureRequested,
-  required RecordingState recordingState,
-  required CaptureTranscriptionState transcription,
-  required CaptureDurabilityState durability,
-  String? recordingId,
-  String? sourceReason,
-  DateTime? sourceLastOutputAt,
-  String? transcriptionReason,
-  String? durabilityReason,
-  bool paused = false,
-}) {
-  final source = switch (recordingState) {
-    RecordingState.initialising => CaptureSourceState.starting,
-    RecordingState.record ||
-    RecordingState.deviceRecord ||
-    RecordingState.systemAudioRecord => CaptureSourceState.live,
-    RecordingState.pause => CaptureSourceState.off,
-    RecordingState.stop => CaptureSourceState.off,
-    RecordingState.interrupted => CaptureSourceState.stalled,
-    RecordingState.error => CaptureSourceState.blocked,
-  };
-
-  return CaptureHealthEvidence(
-    captureRequested: captureRequested,
-    source: source,
-    transcription: transcription,
-    durability: durability,
-    recordingId: recordingId,
-    sourceReason: sourceReason,
-    sourceLastOutputAt: sourceLastOutputAt,
-    transcriptionReason: transcriptionReason,
-    durabilityReason: durabilityReason,
-    paused: paused,
-  );
-}
+CaptureSourceState captureSourceStateForRecording(RecordingState state) => switch (state) {
+      RecordingState.initialising => CaptureSourceState.starting,
+      RecordingState.record => CaptureSourceState.live,
+      RecordingState.deviceRecord => CaptureSourceState.live,
+      RecordingState.systemAudioRecord => CaptureSourceState.live,
+      RecordingState.pause => CaptureSourceState.off,
+      RecordingState.stop => CaptureSourceState.off,
+      RecordingState.interrupted => CaptureSourceState.stalled,
+      RecordingState.error => CaptureSourceState.blocked,
+    };
