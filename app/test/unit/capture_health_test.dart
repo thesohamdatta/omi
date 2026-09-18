@@ -9,7 +9,6 @@ void main() {
   test('live source with ready transcription is capturing', () {
     final result = projection.project(
       const CaptureHealthEvidence(
-        captureRequested: true,
         source: CaptureSourceState.live,
         transcription: CaptureTranscriptionState.ready,
         durability: CaptureDurabilityState.available,
@@ -18,17 +17,12 @@ void main() {
     );
 
     expect(result.health, CaptureHealth.capturing);
-    expect(result.source, CaptureSourceState.live);
-    expect(result.transcription, CaptureTranscriptionState.ready);
-    expect(result.durability, CaptureDurabilityState.available);
-    expect(result.recordingId, 'recording-1');
     expect(result.reason, isNull);
   });
 
   test('live source stays capturing when transcription is degraded', () {
     final result = projection.project(
       const CaptureHealthEvidence(
-        captureRequested: true,
         source: CaptureSourceState.live,
         transcription: CaptureTranscriptionState.degraded,
         durability: CaptureDurabilityState.available,
@@ -45,7 +39,6 @@ void main() {
   test('stalled source is degraded with its reason', () {
     final result = projection.project(
       const CaptureHealthEvidence(
-        captureRequested: true,
         source: CaptureSourceState.stalled,
         transcription: CaptureTranscriptionState.ready,
         durability: CaptureDurabilityState.available,
@@ -58,28 +51,22 @@ void main() {
     expect(result.reason, 'no_audio_evidence');
   });
 
-  test('deliberate pause is off and never treated as failure', () {
+  test('deliberate off source is off without a failure', () {
     final result = projection.project(
       const CaptureHealthEvidence(
-        captureRequested: true,
-        source: CaptureSourceState.live,
-        transcription: CaptureTranscriptionState.ready,
-        durability: CaptureDurabilityState.available,
-        recordingId: 'recording-3',
-        paused: true,
+        source: CaptureSourceState.off,
+        transcription: CaptureTranscriptionState.off,
+        durability: CaptureDurabilityState.unknown,
+        reason: null,
       ),
     );
 
     expect(result.health, CaptureHealth.off);
-    expect(result.reason, 'paused');
-    expect(result.source, CaptureSourceState.off);
-    expect(result.transcription, CaptureTranscriptionState.off);
   });
 
-  test('requested capture with no producing source is not healthy', () {
+  test('requested startup is degraded until source is live', () {
     final result = projection.project(
       const CaptureHealthEvidence(
-        captureRequested: true,
         source: CaptureSourceState.starting,
         transcription: CaptureTranscriptionState.connecting,
         durability: CaptureDurabilityState.unknown,
@@ -91,24 +78,9 @@ void main() {
     expect(result.reason, 'starting');
   });
 
-  test('not requested is off without inventing a failure', () {
-    final result = projection.project(
-      const CaptureHealthEvidence(
-        captureRequested: false,
-        source: CaptureSourceState.off,
-        transcription: CaptureTranscriptionState.off,
-        durability: CaptureDurabilityState.unknown,
-      ),
-    );
-
-    expect(result.health, CaptureHealth.off);
-    expect(result.reason, 'not_requested');
-  });
-
   test('existing recording identity is preserved by the projection', () {
     final result = projection.project(
       const CaptureHealthEvidence(
-        captureRequested: true,
         source: CaptureSourceState.live,
         transcription: CaptureTranscriptionState.connecting,
         durability: CaptureDurabilityState.pending,
@@ -120,16 +92,14 @@ void main() {
   });
 
   test('recording state adapter maps current production states', () {
-    final evidence = captureHealthEvidenceFromRecordingState(
-      captureRequested: true,
-      recordingState: RecordingState.record,
+    final evidence = CaptureHealthEvidence(
+      source: captureSourceStateForRecording(RecordingState.record),
       transcription: CaptureTranscriptionState.ready,
       durability: CaptureDurabilityState.available,
       recordingId: 'recording-4',
     );
 
     expect(evidence.source, CaptureSourceState.live);
-    expect(evidence.captureRequested, isTrue);
     expect(evidence.recordingId, 'recording-4');
   });
 }
