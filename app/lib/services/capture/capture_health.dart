@@ -139,13 +139,42 @@ class CaptureHealthProjection {
   }
 }
 
+/// Maps lifecycle/control state only. It cannot prove that the producer is
+/// emitting audio, so a recording lifecycle state never manufactures `live`.
 CaptureSourceState captureSourceStateForRecording(RecordingState state) => switch (state) {
       RecordingState.initialising => CaptureSourceState.starting,
-      RecordingState.record => CaptureSourceState.live,
-      RecordingState.deviceRecord => CaptureSourceState.live,
-      RecordingState.systemAudioRecord => CaptureSourceState.live,
+      RecordingState.record => CaptureSourceState.starting,
+      RecordingState.deviceRecord => CaptureSourceState.starting,
+      RecordingState.systemAudioRecord => CaptureSourceState.starting,
       RecordingState.pause => CaptureSourceState.off,
       RecordingState.stop => CaptureSourceState.off,
       RecordingState.interrupted => CaptureSourceState.stalled,
       RecordingState.error => CaptureSourceState.blocked,
     };
+
+/// Builds source evidence using observed audio output as the authority for
+/// `live`. Lifecycle state is supporting context only.
+CaptureHealthEvidence captureHealthEvidenceForAudioOutput({
+  required RecordingState recordingState,
+  required bool hasAudioOutput,
+  DateTime? lastAudioOutputAt,
+  String? recordingId,
+}) {
+  final lifecycle = captureSourceStateForRecording(recordingState);
+  final source = hasAudioOutput
+      ? CaptureSourceState.live
+      : lifecycle == CaptureSourceState.off || lifecycle == CaptureSourceState.blocked
+          ? lifecycle
+          : lifecycle == CaptureSourceState.stalled
+              ? CaptureSourceState.stalled
+              : CaptureSourceState.starting;
+
+  return CaptureHealthEvidence(
+    source: source,
+    transcription: CaptureTranscriptionState.connecting,
+    durability: CaptureDurabilityState.unknown,
+    recordingId: recordingId,
+    sourceReason: source == CaptureSourceState.starting ? 'awaiting_audio_output' : null,
+    sourceLastOutputAt: lastAudioOutputAt,
+  );
+}
