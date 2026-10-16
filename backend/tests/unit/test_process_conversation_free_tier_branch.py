@@ -407,7 +407,6 @@ def test_basic_desktop_without_projection_is_terminal_minimum(monkeypatch, pc) -
     spies['should_defer'].assert_not_called()
 
 
-# red-proof: skip `_get_structured` on process_normally (paid desktop would not enrich)
 def test_trial_paywall_still_skips_enrichment_when_force_process_is_true(monkeypatch, pc) -> None:
     spies = _spy_managed_effects(monkeypatch, pc)
     monkeypatch.setattr(pc, 'is_trial_paywalled', lambda _uid, _platform: True)
@@ -426,6 +425,7 @@ def test_trial_paywall_still_skips_enrichment_when_force_process_is_true(monkeyp
     spies['should_defer'].assert_not_called()
 
 
+# red-proof: skip `_get_structured` on process_normally (paid desktop would not enrich)
 def test_process_normally_reaches_structured_and_jit_block(monkeypatch, pc) -> None:
     _enable_flag(monkeypatch, pc)
     spies = _spy_managed_effects(monkeypatch, pc)
