@@ -408,6 +408,24 @@ def test_basic_desktop_without_projection_is_terminal_minimum(monkeypatch, pc) -
 
 
 # red-proof: skip `_get_structured` on process_normally (paid desktop would not enrich)
+def test_trial_paywall_still_skips_enrichment_when_force_process_is_true(monkeypatch, pc) -> None:
+    spies = _spy_managed_effects(monkeypatch, pc)
+    monkeypatch.setattr(pc, 'is_trial_paywalled', lambda _uid, _platform: True)
+
+    result = pc.process_conversation(
+        'trial-paywalled-uid',
+        'en',
+        _existing_desktop('trial-paywalled-conversation'),
+        force_process=True,
+    )
+
+    assert result.status == ConversationStatus.completed
+    spies['get_structured'].assert_not_called()
+    spies['extract_memories'].assert_not_called()
+    spies['trigger_apps'].assert_not_called()
+    spies['should_defer'].assert_not_called()
+
+
 def test_process_normally_reaches_structured_and_jit_block(monkeypatch, pc) -> None:
     _enable_flag(monkeypatch, pc)
     spies = _spy_managed_effects(monkeypatch, pc)
