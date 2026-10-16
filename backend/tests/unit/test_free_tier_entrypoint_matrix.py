@@ -373,6 +373,16 @@ _ENTRIES: list[dict[str, Any]] = [
         'kwargs': {},
     },
     {
+        'id': 'developer_from_segments_desktop',
+        'label': (
+            'routers/developer.py:_create_conversation_from_segments desktop '
+            '(coordinator-with-exact-args; explicit finalized desktop transcript, force_process=True)'
+        ),
+        'kind': 'create',
+        'source': ConversationSource.desktop,
+        'kwargs': {'force_process': True},
+    },
+    {
         'id': 'listen_157_via_finalizer_137',
         'label': (
             'routers/listen/conversations.py:157 → finalizer.py:137 '
