@@ -7,17 +7,20 @@ Desktop recordings uploaded through the `/v1/conversations/from-segments` ingest
 ## Evidence and Current Understanding
 
 - Upstream report: [BasedHardware/omi#19705](https://github.com/BasedHardware/omi/issues/19705).
-- Related proposed fix: [BasedHardware/omi#19788](https://github.com/BasedHardware/omi/pull/19788). Its hypothesis is that the from-segments route omits the `CLIENT_FINALIZE` processing trigger used by other explicit client-finalization paths.
-- In the current fork’s `backend/routers/developer.py`, the from-segments path builds processing kwargs for the optional client projection and calls `process_conversation` without explicitly passing a trigger.
-- The processing-trigger policy distinguishes a deferred capture-end path from explicit client finalization. The suspected mismatch can therefore take a legacy deferred-processing path and persist the minimal/placeholder conversation instead of running enrichment immediately.
-- Existing tests reported on upstream PR #19788 cover from-segments idempotency and the free-tier entrypoint matrix. Those counts/results are upstream-authored claims, not independently verified here; OpenHands must run the relevant tests on this fork and report the real outputs.
+- Related proposed fix: [BasedHardware/omi#19788](https://github.com/BasedHardware/omi/pull/19788). That newer upstream code uses a ProcessingTrigger.CLIENT_FINALIZE abstraction; that abstraction does not exist in this fork and must not be copied into it as a one-off import.
+- Before this change, the from-segments route passed neither force_process nor a trigger, while the established explicit desktop create/finalize path passes force_process=True to process_conversation. The local regression test reproduced the missing call intent before the fix.
+- With the rollout flag off, that mismatch allows should_defer_desktop_processing to persist a deferred placeholder for a free-tier desktop transcript instead of enriching the already-finalized upload. The fork-local equivalent is to request force_process=True for desktop from-segments uploads, matching the sibling route.
+- This only bypasses the legacy capture-time deferral. The coordinator's trial-paywall early return remains authoritative, and the rollout-on FREE_TIER_LOCAL_PROCESSING policy still sends identified-basic desktop accounts to the minimum/projection path even when force_process=True.
+- Upstream PR test counts are not evidence for this fork. The local regression test failed before the route change because the route omitted force_process; the repository's file-isolated runner then passed 277 focused tests across from-segments idempotency, free-tier entrypoint, policy, and coordinator branch files. The trial-paywall guard also verifies force_process does not bypass the paywall.
 - The code and issue must be rechecked at implementation time in case the fork has diverged or the bug has already been fixed.
 
-This is a strong, evidence-backed hypothesis, not yet a demonstrated local reproduction. Confirm it with a regression test before treating the trigger adjustment as proven.
+The fork-local behavior is now demonstrated: the test failed before the route change, and the regression plus coordinator policy matrix pass after the change. The upstream ProcessingTrigger design is not imported; this fork uses its existing force_process contract.
 
 ## Solution
 
 Make the from-segments finalization path express the correct processing intent so a completed desktop upload follows the same explicit-finalization semantics as the established sibling client path. Preserve idempotency and admission/lifecycle guarantees. Keep subscription, rollout, and free-tier policy gates authoritative: choosing the right trigger must not silently bypass access policy or accidentally impose eager paid processing on accounts that are intentionally assigned a minimum/deferred path.
+
+**Product-impact note for review:** With the rollout flag off, this makes free-tier desktop from-segments uploads enrich at upload rather than waiting for first-open, matching the sibling explicit-finalize paths. The trial paywall and rollout-on `FREE_TIER_LOCAL_PROCESSING` entitlement policy remain authoritative. Confirm this upload-time spend parity before merging; it is deliberately called out rather than treated as an incidental side effect.
 
 ## User Stories
 
@@ -27,11 +30,11 @@ Make the from-segments finalization path express the correct processing intent s
 4. As a client that retries finalization, I want the existing idempotency contract to continue preventing duplicate or conflicting conversations and processing.
 5. As a maintainer, I want a behavioral regression test that fails against the broken behavior and passes with the fix, exercising production behavior through the existing deterministic seam rather than only asserting source text.
 6. As a maintainer, I want focused test commands and their actual outcomes recorded in the PR so a reviewer can distinguish a validated fix from an unverified code change.
-7. As a contributor working in this fork, I want the change to remain scoped to the trigger/finalization contract and closely related regression coverage, so OpenHands does not opportunistically expand it into a transcription, diarization, or architecture rewrite.
+7. As a contributor working in this fork, I want the change scoped to the finalization contract and related regression coverage, so implementation does not expand into transcription, diarization, or an architecture rewrite.
 
 ## Implementation Decisions
 
-- Verify the current fork’s route, processing coordinator, trigger semantics, and relevant tests immediately before changing code. Do not assume upstream PR #19788 applies unchanged.
+- Verify the current fork’s route, processing coordinator API, and relevant tests immediately before changing code. Do not assume the newer ProcessingTrigger abstraction in upstream PR #19788 exists in this fork.
 - Use the existing from-segments endpoint/coordinator boundary as the primary test seam. Prefer the smallest deterministic behavioral test that proves the request’s processing intent and the persisted/user-visible result for an account eligible for enrichment.
 - Add/extend policy-matrix coverage for an account or rollout state that must retain the minimum/deferred behavior. The corrected finalization signal must not weaken downstream eligibility checks.
 - Preserve the route’s idempotency and processing-admission behavior. Avoid changing persistence ordering or adding a parallel finalization path unless a test demonstrates it is necessary.
@@ -43,10 +46,10 @@ Make the from-segments finalization path express the correct processing intent s
 ## Testing Decisions
 
 Run the narrowest relevant existing tests first, then the backend runner/lane required by the repository guidance. At minimum:
-1. From-segments regression coverage: prove an eligible explicit desktop finalization enters the intended enrichment path and persists the expected enriched result/contract.
+1. From-segments regression coverage: prove the desktop route passes force_process=True and verify its coordinator effect through the entrypoint matrix for eligible and policy-ineligible account states.
 2. Idempotency tests: retries do not create duplicate conversations or double-finalize.
 3. Free-tier/rollout entrypoint matrix: policy-ineligible cases remain on the intended minimum/deferred behavior and do not bypass paywall/eligibility.
-4. Relevant processing-trigger/coordinator tests.
+4. Relevant coordinator, free-tier policy, trial-paywall, and lifecycle tests.
 5. Run the documented backend test/check command that is feasible in the environment (consult `backend/AGENTS.md` and root `AGENTS.md`); report exact commands, pass/fail counts, and any environmental skips.
 6. If tests pass, run the real user-facing path only if the available offline/dev harness can do so safely. Do not connect to production or process real user recordings for verification.
 
