@@ -13,9 +13,9 @@ Desktop recordings uploaded through the `/v1/conversations/from-segments` ingest
 - This only bypasses the legacy capture-time deferral. The coordinator's trial-paywall early return remains authoritative, and the rollout-on FREE_TIER_LOCAL_PROCESSING policy still sends identified-basic desktop accounts to the minimum/projection path even when force_process=True.
 - With FREE_TIER_LOCAL_PROCESSING off, force_process=True also makes the existing BASIC_PLAN_GATE_EAGER_EXTRACTION_ENABLED guard reachable. That guard is default-off; if enabled, its identified-basic deny still persists the deterministic minimum. The existing coordinator tests cover this gate, so the PR must not claim that force_process bypasses it.
 - Upstream PR test counts are not evidence for this fork. The initial red reproduction failed because the route omitted force_process. The route test was then promoted to the public HTTP seam and now verifies desktop uses force_process while phone uploads do not. Four isolated focused files pass 278 tests across from-segments idempotency, the free-tier entrypoint matrix, policy, and coordinator branch coverage. The trial-paywall guard verifies force_process does not bypass the paywall.
-- The code and issue must be rechecked at implementation time in case the fork has diverged or the bug has already been fixed.
+- The current fork's route, coordinator contract, related tests, and upstream issue were rechecked before the change; the local regression now verifies the fork-specific behavior.
 
-The fork-local behavior is now demonstrated: the test failed before the route change, and the regression plus coordinator policy matrix pass after the change. The upstream ProcessingTrigger design is not imported; this fork uses its existing force_process contract.
+The public-route regression is red-capable: temporarily removing the desktop force_process block makes the desktop case fail while the phone case passes (1 failed, 1 passed); restoring the block makes both pass (2 passed). The upstream ProcessingTrigger design is not imported; this fork uses its existing force_process contract.
 
 ## Solution
 
