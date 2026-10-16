@@ -268,13 +268,17 @@ def test_no_client_session_id_preserves_create_conversation_path(monkeypatch):
     )
 
 
-def test_from_segments_uses_explicit_finalize_processing_for_desktop(monkeypatch):
+@pytest.mark.parametrize(
+    ('source', 'expected_force_process'),
+    [('desktop', True), ('phone', False)],
+)
+def test_from_segments_uses_explicit_finalize_processing_only_for_desktop(monkeypatch, source, expected_force_process):
     captured = {}
 
     def process(_uid, _language, conversation, **kwargs):
         captured.update(kwargs)
         return Conversation(
-            id='finalized-desktop',
+            id='finalized-conversation',
             created_at=NOW,
             started_at=conversation.started_at,
             finished_at=conversation.finished_at,
@@ -287,11 +291,22 @@ def test_from_segments_uses_explicit_finalize_processing_for_desktop(monkeypatch
         )
 
     monkeypatch.setattr(developer, 'process_conversation', process)
+    monkeypatch.setattr(
+        developer,
+        'resolve_client_device_from_request',
+        lambda _request: SimpleNamespace(client_device_id=None, platform='macos'),
+    )
 
-    response = developer._create_conversation_from_segments('uid1', _request(source='desktop'))
+    app = FastAPI()
+    app.include_router(developer.router)
+    response = TestClient(app).post(
+        '/v1/conversations/from-segments',
+        json=_request(source=source).model_dump(mode='json'),
+    )
 
-    assert response.id == 'finalized-desktop'
-    assert captured.get('force_process') is True
+    assert response.status_code == 200
+    assert response.json()['id'] == 'finalized-conversation'
+    assert captured.get('force_process', False) is expected_force_process
 
 
 def test_client_session_id_uses_stable_conversation_id(monkeypatch):
