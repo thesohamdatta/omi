@@ -2063,6 +2063,13 @@ def _create_conversation_from_segments(
     process_kwargs: dict = {}
     if client_projection is not None:
         process_kwargs['client_projection'] = client_projection
+    # This endpoint receives a transcript the client has already finalized.
+    # Match the explicit desktop create/finalize path: the legacy capture-end
+    # deferral would otherwise persist a title-only placeholder for free-tier
+    # desktop uploads. The coordinator's trial-paywall and rollout-on
+    # free-tier policy gates still run before this legacy deferral check.
+    if source == ConversationSource.desktop:
+        process_kwargs['force_process'] = True
     try:
         if conversation_id:
             with lifecycle_service.processing_admission_guard(uid, conversation_id, rollback_on_failure=False):
